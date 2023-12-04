@@ -1,150 +1,117 @@
-class WindowManager 
-{
-	#windows;
-	#count;
-	#id;
-	#winData;
-	#winShapeChangeCallback;
-	#winChangeCallback;
-	
-	constructor ()
-	{
-		let that = this;
+class WindowManager {
+	bc;
+	scene;
+	cubes = new Map();
+	cubeIndex;
 
-		// event listener for when localStorage is changed from another window
-		addEventListener("storage", (event) => 
-		{
-			if (event.key == "windows")
-			{
-				let newWindows = JSON.parse(event.newValue);
-				let winChange = that.#didWindowsChange(that.#windows, newWindows);
+	constructor() {
+		let windowsCount = +localStorage.getItem('windowsCount') + 1;
+		localStorage.setItem('windowsCount', windowsCount);
 
-				that.#windows = newWindows;
+		this.bc = new BroadcastChannel('multiWindowChannel');
+		this.bc.onmessage = (ev) => {
+			let {type, data} = ev.data
+			switch (type) {
+				case 'update':
+					this.updateCube(data.i, data.cube.x, data.cube.y);
+					break;
+				case 'exit':
+					this.removeCube(data);
+					break;
+				case 'hello':
+					let {c} = this.cubes.get(this.cubeIndex);
+					this.bc.postMessage({
+						type: 'update',
+						data: {
+							i: this.cubeIndex,
+							cube: { x: c.x, y: c.y },
+						}
+					});
+					break;
+			}
+		}
 
-				if (winChange)
-				{
-					if (that.#winChangeCallback) that.#winChangeCallback();
+		window.addEventListener('beforeunload', (ev) => {
+			this.bc.postMessage({
+				type: 'exit',
+				data: this.cubeIndex,
+			});
+
+			let windowsCount = +localStorage.getItem('windowsCount');
+			localStorage.setItem('windowsCount', windowsCount-1);
+
+			if (windowsCount == 1) {
+				localStorage.setItem('cubesCount', 0);
+			}
+
+			this.bc.close();
+		});
+	}
+
+	init(scene, x, y) {
+		this.scene = scene;
+
+		this.cubeIndex = +localStorage.getItem('cubesCount') + 1;
+		localStorage.setItem('cubesCount', this.cubeIndex);
+
+		this.updateCube(this.cubeIndex, x, y);
+		this.bc.postMessage({ type: 'hello' });
+	}
+
+	create3DCube(i) {
+		let color = new THREE.Color();
+		color.setHSL(i * .1, 1.0, .5);
+
+		let s = 100 + 1 * 50;
+		return new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color: color, wireframe: true }));
+	}
+
+	updateCube(i, x, y) {
+		let c3d;
+		let storedCube = this.cubes.get(i);
+
+		if (!storedCube) {
+			c3d = this.create3DCube(i);
+			this.scene.add(c3d);
+		} else {
+			c3d = storedCube.c3d;
+		}
+
+		this.cubes.set(i, {
+			c: { x: x, y: y },
+			c3d: c3d
+		});
+
+		if (i == this.cubeIndex) {
+			this.bc.postMessage({
+				type: 'update',
+				data: {
+					i: i,
+					cube: { x: x, y: y },
 				}
-			}
-		});
-
-		// event listener for when current window is about to ble closed
-		window.addEventListener('beforeunload', function (e) 
-		{
-			let index = that.getWindowIndexFromId(that.#id);
-
-			//remove this window from the list and update local storage
-			that.#windows.splice(index, 1);
-			that.updateWindowsLocalStorage();
-		});
-	}
-
-	// check if theres any changes to the window list
-	#didWindowsChange (pWins, nWins)
-	{
-		if (pWins.length != nWins.length)
-		{
-			return true;
-		}
-		else
-		{
-			let c = false;
-
-			for (let i = 0; i < pWins.length; i++)
-			{
-				if (pWins[i].id != nWins[i].id) c = true;
-			}
-
-			return c;
+			});
 		}
 	}
 
-	// initiate current window (add metadata for custom data to store with each window instance)
-	init (metaData)
-	{
-		this.#windows = JSON.parse(localStorage.getItem("windows")) || [];
-		this.#count= localStorage.getItem("count") || 0;
-		this.#count++;
-
-		this.#id = this.#count;
-		let shape = this.getWinShape();
-		this.#winData = {id: this.#id, shape: shape, metaData: metaData};
-		this.#windows.push(this.#winData);
-
-		localStorage.setItem("count", this.#count);
-		this.updateWindowsLocalStorage();
+	removeCube(i) {
+		let {c3d} = this.cubes.get(i);
+		this.scene.remove(c3d);
+		this.cubes.delete(i);
 	}
 
-	getWinShape ()
-	{
-		let shape = {x: window.screenLeft, y: window.screenTop, w: window.innerWidth, h: window.innerHeight};
-		return shape;
+	getCubes() {
+		return [...this.cubes.entries()];
 	}
 
-	getWindowIndexFromId (id)
-	{
-		let index = -1;
+	getTime() {
+		return (new Date()).getTime() / 1000.0;
+	}
 
-		for (let i = 0; i < this.#windows.length; i++)
-		{
-			if (this.#windows[i].id == id) index = i;
+	getAbsoluteXY(x, y) {
+		return {
+			x: window.screenLeft + x,
+			y: window.screenTop + y
 		}
-
-		return index;
-	}
-
-	updateWindowsLocalStorage ()
-	{
-		localStorage.setItem("windows", JSON.stringify(this.#windows));
-	}
-
-	update ()
-	{
-		//console.log(step);
-		let winShape = this.getWinShape();
-
-		//console.log(winShape.x, winShape.y);
-
-		if (winShape.x != this.#winData.shape.x ||
-			winShape.y != this.#winData.shape.y ||
-			winShape.w != this.#winData.shape.w ||
-			winShape.h != this.#winData.shape.h)
-		{
-			
-			this.#winData.shape = winShape;
-
-			let index = this.getWindowIndexFromId(this.#id);
-			this.#windows[index].shape = winShape;
-
-			//console.log(windows);
-			if (this.#winShapeChangeCallback) this.#winShapeChangeCallback();
-			this.updateWindowsLocalStorage();
-		}
-	}
-
-	setWinShapeChangeCallback (callback)
-	{
-		this.#winShapeChangeCallback = callback;
-	}
-
-	setWinChangeCallback (callback)
-	{
-		this.#winChangeCallback = callback;
-	}
-
-	getWindows ()
-	{
-		return this.#windows;
-	}
-
-	getThisWindowData ()
-	{
-		return this.#winData;
-	}
-
-	getThisWindowID ()
-	{
-		return this.#id;
 	}
 }
 
