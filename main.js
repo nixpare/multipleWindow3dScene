@@ -59,8 +59,8 @@ function updateCubes() {
 	windowManager.cubes.forEach(({c, c3d}) => {
 		c3d.position.x = c.x - window.screenLeft;
 		c3d.position.y = c.y - window.screenTop;
-		c3d.rotation.x += .003;
-		c3d.rotation.y += .002;
+		c3d.rotation.x = t * .5;
+		c3d.rotation.y = t * .3;
 	})
 }
 
